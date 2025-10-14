@@ -2,7 +2,7 @@ name: Post Crypto Update Daily
 
 on:
   schedule:
- - cron: '*/5 * * * *'  # Runs every 5 minute
+    - cron: '0 * * * *'  # Runs every hour at minute 0 (UTC)
   workflow_dispatch:
 
 jobs:
