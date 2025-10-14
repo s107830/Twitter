@@ -1,8 +1,7 @@
-# crypto_bot.py
-
 import os
 import requests
 import tweepy
+from crypto_news_api import CryptoControlAPI
 import time
 
 def load_twitter_client():
@@ -34,7 +33,7 @@ def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     resp = requests.get(url, params=params)
     resp.raise_for_status()
     data = resp.json()
-    return data  # e.g. { "bitcoin": {"usd": 30000, "usd_24h_change": 2.5}, ... }
+    return data
 
 def format_tweet(data):
     """Format a tweet string based on fetched crypto data."""
@@ -44,28 +43,49 @@ def format_tweet(data):
         change = coin_info.get("usd_24h_change")
         if price is None or change is None:
             continue
-        # Format change with sign
         sign = "+" if change >= 0 else ""
         lines.append(f"{coin.capitalize()}: ${price:,.2f} ({sign}{change:.2f}%)")
     lines.append("#crypto #Bitcoin #Ethereum")
     tweet = "\n".join(lines)
     return tweet
 
+def fetch_crypto_news(api_key, language="en"):
+    """Fetch top crypto news using CryptoControl API."""
+    api = CryptoControlAPI(api_key)
+    api.enableSentiment()
+    top_news = api.getTopNews(language=language)
+    news_lines = ["📰 Top Crypto News"]
+    for article in top_news:
+        title = article.get("title")
+        source = article.get("source", {}).get("name")
+        url = article.get("url")
+        if title and source and url:
+            news_lines.append(f"{title} - {source}\n{url}")
+    return "\n\n".join(news_lines)
+
 def post_tweet(client, text):
     """Post a tweet using the Tweepy client."""
     try:
         resp = client.create_tweet(text=text)
-        # resp.data contains tweet info (e.g. id)
         print("Tweet posted, response:", resp)
     except Exception as e:
         print("Error posting tweet:", e)
 
 def main():
     client = load_twitter_client()
-    crypto = fetch_crypto_prices()
-    tweet_text = format_tweet(crypto)
+    crypto_data = fetch_crypto_prices()
+    tweet_text = format_tweet(crypto_data)
     print("Tweet content:\n", tweet_text)
     post_tweet(client, tweet_text)
 
+    # Fetch and post crypto news
+    api_key = os.getenv("CRYPTO_NEWS_API_KEY")
+    if api_key:
+        news_text = fetch_crypto_news(api_key)
+        print("News content:\n", news_text)
+        post_tweet(client, news_text)
+    else:
+        print("Crypto news API key is missing.")
+    
 if __name__ == "__main__":
     main()
