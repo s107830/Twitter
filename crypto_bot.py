@@ -2,10 +2,9 @@ import os
 import requests
 import tweepy
 import feedparser
-from datetime import datetime
 
-# Load Twitter client using credentials from environment variables
 def load_twitter_client():
+    """Load Twitter client using credentials from environment variables."""
     consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
     consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
     access_token = os.getenv("TWITTER_ACCESS_TOKEN")
@@ -22,8 +21,8 @@ def load_twitter_client():
     )
     return client
 
-# Fetch current price and 24h change from CoinGecko
 def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
+    """Fetch current price and 24h change from CoinGecko."""
     url = "https://api.coingecko.com/api/v3/simple/price"
     params = {
         "ids": ",".join(ids),
@@ -35,17 +34,17 @@ def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     data = resp.json()
     return data
 
-# Fetch latest news headlines from CoinDesk
 def fetch_news():
-    url = "https://www.coindesk.com/feed/"
+    """Fetch latest news headlines from CoinDesk."""
+    url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
     feed = feedparser.parse(url)
     headlines = []
     for entry in feed.entries[:3]:  # Fetch top 3 news items
         headlines.append(f"📰 {entry.title} ({entry.link})")
     return "\n".join(headlines)
 
-# Format the tweet content
 def format_tweet(crypto_data, news):
+    """Format the tweet content."""
     lines = ["📈 Daily Crypto Update"]
     for coin, coin_info in crypto_data.items():
         price = coin_info.get("usd")
@@ -59,15 +58,14 @@ def format_tweet(crypto_data, news):
     tweet = "\n".join(lines)
     return tweet
 
-# Post the tweet using the Tweepy client
 def post_tweet(client, text):
+    """Post the tweet using the Tweepy client."""
     try:
         resp = client.create_tweet(text=text)
         print("Tweet posted successfully:", resp)
     except Exception as e:
         print("Error posting tweet:", e)
 
-# Main function to execute the bot
 def main():
     client = load_twitter_client()
     crypto_data = fetch_crypto_prices()
