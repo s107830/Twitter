@@ -1,2 +1,3 @@
 requests
 tweepy
+git+https://github.com/cryptocontrol/crypto-news-api.git
