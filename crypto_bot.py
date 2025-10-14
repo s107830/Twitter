@@ -2,10 +2,6 @@ import os
 import requests
 import tweepy
 import time
-from datetime import datetime
-
-# Define the selected news source
-NEWS_SOURCE = "Cointelegraph"
 
 def load_twitter_client():
     """Load Twitter client using credentials from environment variables."""
@@ -25,13 +21,9 @@ def load_twitter_client():
     )
     return client
 
-def fetch_latest_news(source):
-    """Fetch the latest crypto news headline from the selected source."""
-    if source == "Cointelegraph":
-        url = "https://cointelegraph.com/api/v1/articles"
-    else:
-        raise ValueError("Unsupported news source")
-
+def fetch_latest_news():
+    """Fetch the latest crypto news headline from Cointelegraph."""
+    url = "https://cointelegraph.com/api/v1/articles"
     resp = requests.get(url)
     resp.raise_for_status()
     data = resp.json()
@@ -55,8 +47,8 @@ def post_tweet(client, text):
 
 def main():
     client = load_twitter_client()
-    latest_news = fetch_latest_news(NEWS_SOURCE)
-    news = {"source": NEWS_SOURCE, "headline": latest_news}
+    latest_news = fetch_latest_news()
+    news = {"source": "Cointelegraph", "headline": latest_news}
     tweet_text = format_tweet(news)
     print("Tweet content:\n", tweet_text)
     post_tweet(client, tweet_text)
