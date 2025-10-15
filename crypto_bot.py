@@ -1,10 +1,8 @@
 import os
-import requests
 import tweepy
 import feedparser
 import traceback
 
-# Load Twitter API credentials from environment variables
 def load_twitter_client():
     consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
     consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
@@ -28,84 +26,21 @@ def load_twitter_client():
     )
     return client
 
-# Fetch cryptocurrency prices from CoinGecko API
-def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
-    print("[INFO] Fetching crypto prices from CoinGecko...")
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {
-        "ids": ",".join(ids),
-        "vs_currencies": vs_currency,
-        "include_24hr_change": "true"
-    }
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        print("[INFO] Crypto price data received:", data)
-        return data
-    except Exception as e:
-        print("[ERROR] Failed to fetch crypto prices:", e)
-        return {}
-
-# Format tweet text for crypto price update
-def format_price_tweet(data):
-    print("[INFO] Formatting crypto price tweet...")
-    lines = ["📈 Daily Crypto Update"]
-    for coin, coin_info in data.items():
-        price = coin_info.get("usd")
-        change = coin_info.get("usd_24h_change")
-        if price is None or change is None:
-            continue
-        sign = "+" if change >= 0 else ""
-        lines.append(f"{coin.capitalize()}: ${price:,.2f} ({sign}{change:.2f}%)")
-    lines.append("#crypto #Bitcoin #Ethereum")
-    tweet = "\n".join(lines)
-    print("[DEBUG] Formatted price tweet:\n", tweet)
-    return tweet
-
-# Fetch headlines from a single RSS feed URL
-def fetch_headlines_from_rss(rss_url, limit=5):
-    print(f"[INFO] Fetching headlines from {rss_url} ...")
+def fetch_first_headline(rss_url):
+    print(f"[INFO] Fetching headline from {rss_url}")
     feedparser.USER_AGENT = "Mozilla/5.0 (compatible; CryptoBot/1.0)"
     feed = feedparser.parse(rss_url)
 
-    print("[DEBUG] Feed status:", feed.get("status", "unknown"))
-    print("[DEBUG] Feed bozo:", feed.bozo)
     if feed.bozo:
-        print("[ERROR] Feed parsing error:", feed.bozo_exception)
-    print("[DEBUG] Total entries found:", len(feed.entries))
+        print(f"[ERROR] Feed parsing error: {feed.bozo_exception}")
+        return None
 
     if not feed.entries:
-        return []
+        print("[WARN] No entries found in feed.")
+        return None
 
-    headlines = []
-    for entry in feed.entries[:limit]:
-        headlines.append(entry.title.strip())
-    return headlines
+    return feed.entries[0].title.strip()
 
-# Fetch and combine headlines from multiple RSS feeds
-def fetch_combined_crypto_news(rss_feeds, max_headlines=10):
-    all_headlines = []
-    seen = set()
-
-    for rss_url in rss_feeds:
-        headlines = fetch_headlines_from_rss(rss_url, limit=max_headlines)
-        for h in headlines:
-            if h not in seen:
-                seen.add(h)
-                all_headlines.append(h)
-            if len(all_headlines) >= max_headlines:
-                break
-        if len(all_headlines) >= max_headlines:
-            break
-
-    if not all_headlines:
-        return "No crypto news available."
-
-    formatted_headlines = "\n".join(f"• {h}" for h in all_headlines)
-    return formatted_headlines
-
-# Post a tweet using the Twitter API client
 def post_tweet(client, text):
     try:
         if len(text) > 280:
@@ -120,31 +55,29 @@ def post_tweet(client, text):
 
 def main():
     try:
-        print("[INFO] Starting Crypto Twitter Bot")
+        print("[INFO] Starting single headline crypto news bot")
 
         client = load_twitter_client()
 
-        # Post Crypto Price Update
-        crypto_data = fetch_crypto_prices()
-        if crypto_data:
-            price_tweet = format_price_tweet(crypto_data)
-            post_tweet(client, price_tweet)
-        else:
-            print("[WARN] No crypto price data to tweet.")
-
-        # RSS Feeds to fetch news from
         rss_feeds = [
-            "https://feeds.feedburner.com/CoinDesk",  # CoinDesk
-            "https://cointelegraph.com/rss",          # CoinTelegraph
-            "https://cryptoslate.com/feed/"           # CryptoSlate
+            "https://feeds.feedburner.com/CoinDesk",
+            "https://cointelegraph.com/rss",
+            "https://cryptoslate.com/feed/"
         ]
 
-        # Fetch combined news headlines from all 3 sources
-        headlines = fetch_combined_crypto_news(rss_feeds, max_headlines=10)
-        print("[INFO] Combined Headlines:\n", headlines)
+        # Try each feed in order until we get a headline
+        headline = None
+        for rss in rss_feeds:
+            headline = fetch_first_headline(rss)
+            if headline:
+                break
 
-        news_tweet = f"📰 Top Crypto News:\n{headlines}\n#crypto #news"
-        post_tweet(client, news_tweet)
+        if not headline:
+            print("[WARN] No headline found from any feed.")
+            headline = "No crypto news available at the moment."
+
+        tweet_text = f"📰 {headline}\n#crypto #news"
+        post_tweet(client, tweet_text)
 
         print("[INFO] Bot run completed.")
 
