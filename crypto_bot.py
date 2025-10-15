@@ -2,9 +2,9 @@ import os
 import requests
 import tweepy
 import random
-from bs4 import BeautifulSoup
 import traceback
 
+# Load Twitter API credentials from environment variables
 def load_twitter_client():
     consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
     consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
@@ -28,6 +28,7 @@ def load_twitter_client():
     )
     return client
 
+# Fetch cryptocurrency prices from CoinGecko API
 def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     url = "https://api.coingecko.com/api/v3/simple/price"
     params = {
@@ -40,6 +41,7 @@ def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     data = resp.json()
     return data
 
+# Format the tweet content for crypto prices
 def format_tweet(data):
     lines = ["📈 Daily Crypto Update"]
     for coin, coin_info in data.items():
@@ -52,24 +54,30 @@ def format_tweet(data):
     lines.append("#crypto #Bitcoin #Ethereum")
     return "\n".join(lines)
 
-def fetch_headlines(url):
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    headlines = [h.get_text(strip=True) for h in soup.find_all('h2')]
-    return headlines[:5]  # Limit to top 5 headlines
+# Fetch the latest crypto news headlines using NewsData.io API
+def fetch_crypto_news(api_key, query="crypto", language="en"):
+    url = "https://newsdata.io/api/1/news"
+    params = {
+        "apikey": api_key,
+        "q": query,
+        "language": language,
+        "category": "crypto"
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error fetching news: {response.status_code}")
+        return None
 
-def get_random_headline():
-    urls = [
-        'https://cointelegraph.com/',
-        'https://www.coindesk.com/',
-        'https://decrypt.co/',
-        'https://beincrypto.com/',
-        'https://u.today/'
-    ]
-    url = random.choice(urls)
-    headlines = fetch_headlines(url)
-    return random.choice(headlines) if headlines else None
+# Extract and format the top 5 headlines from the news data
+def extract_headlines(news_data):
+    if news_data and "results" in news_data:
+        headlines = [article["title"] for article in news_data["results"]]
+        return "\n".join(headlines[:5])  # Limit to top 5 headlines
+    return "No news available."
 
+# Post a tweet using the Twitter API client
 def post_tweet(client, text):
     try:
         resp = client.create_tweet(text=text)
@@ -78,6 +86,7 @@ def post_tweet(client, text):
         print("Error posting tweet:", e)
         traceback.print_exc()
 
+# Main function to fetch data and post tweets
 def main():
     try:
         client = load_twitter_client()
@@ -86,13 +95,10 @@ def main():
         print("Tweet content:\n", tweet_text)
         post_tweet(client, tweet_text)
 
-        headline = get_random_headline()
-        if headline:
-            headline_tweet = f"📰 Crypto News: {headline} #CryptoNews"
-            print("Headline tweet content:\n", headline_tweet)
-            post_tweet(client, headline_tweet)
-        else:
-            print("No headlines found to post.")
+        news_data = fetch_crypto_news("pub_19d1c9837f4e4a0c96da1e25d79e7a54")
+        headlines = extract_headlines(news_data)
+        print("Headlines:\n", headlines)
+        post_tweet(client, f"📰 Crypto News:\n{headlines}")
 
     except Exception as e:
         print("Fatal error in main:", e)
