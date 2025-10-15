@@ -2,16 +2,18 @@ name: Post Crypto Update Daily
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 * * * *'    # Runs every hour at minute 0 (UTC)
   workflow_dispatch:
 
 jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
