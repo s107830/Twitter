@@ -48,7 +48,7 @@ def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
         return {}
 
 # Format tweet text for crypto price update
-def format_tweet(data):
+def format_price_tweet(data):
     print("[INFO] Formatting crypto price tweet...")
     lines = ["📈 Daily Crypto Update"]
     for coin, coin_info in data.items():
@@ -63,14 +63,10 @@ def format_tweet(data):
     print("[DEBUG] Formatted price tweet:\n", tweet)
     return tweet
 
-# Fetch latest headlines from CoinDesk's RSS feed
-def fetch_coindesk_headlines(limit=5):
-    print("[INFO] Fetching CoinDesk headlines...")
-    # More stable CoinDesk RSS feed
-    rss_url = "https://feeds.feedburner.com/CoinDesk"
-
-    # Optional: set user-agent in case host blocks bots
-    feedparser.USER_AGENT = "Mozilla/5.0 (compatible; CryptoBot/1.0; +https://yourproject.com)"
+# Fetch headlines from a single RSS feed URL
+def fetch_headlines_from_rss(rss_url, limit=5):
+    print(f"[INFO] Fetching headlines from {rss_url} ...")
+    feedparser.USER_AGENT = "Mozilla/5.0 (compatible; CryptoBot/1.0)"
     feed = feedparser.parse(rss_url)
 
     print("[DEBUG] Feed status:", feed.get("status", "unknown"))
@@ -80,14 +76,34 @@ def fetch_coindesk_headlines(limit=5):
     print("[DEBUG] Total entries found:", len(feed.entries))
 
     if not feed.entries:
-        return "No CoinDesk news available."
+        return []
 
     headlines = []
     for entry in feed.entries[:limit]:
-        print("[DEBUG] Headline:", entry.title)
-        headlines.append(f"• {entry.title}")
-    
-    return "\n".join(headlines)
+        headlines.append(entry.title.strip())
+    return headlines
+
+# Fetch and combine headlines from multiple RSS feeds
+def fetch_combined_crypto_news(rss_feeds, max_headlines=10):
+    all_headlines = []
+    seen = set()
+
+    for rss_url in rss_feeds:
+        headlines = fetch_headlines_from_rss(rss_url, limit=max_headlines)
+        for h in headlines:
+            if h not in seen:
+                seen.add(h)
+                all_headlines.append(h)
+            if len(all_headlines) >= max_headlines:
+                break
+        if len(all_headlines) >= max_headlines:
+            break
+
+    if not all_headlines:
+        return "No crypto news available."
+
+    formatted_headlines = "\n".join(f"• {h}" for h in all_headlines)
+    return formatted_headlines
 
 # Post a tweet using the Twitter API client
 def post_tweet(client, text):
@@ -102,28 +118,33 @@ def post_tweet(client, text):
         print("[ERROR] Error posting tweet:", e)
         traceback.print_exc()
 
-# Main function
 def main():
     try:
         print("[INFO] Starting Crypto Twitter Bot")
-        
+
         client = load_twitter_client()
 
-        # --- Post Crypto Price Update ---
+        # Post Crypto Price Update
         crypto_data = fetch_crypto_prices()
         if crypto_data:
-            tweet_text = format_tweet(crypto_data)
-            post_tweet(client, tweet_text)
+            price_tweet = format_price_tweet(crypto_data)
+            post_tweet(client, price_tweet)
         else:
-            print("[WARN] No crypto data to tweet.")
+            print("[WARN] No crypto price data to tweet.")
 
-        # --- Post CoinDesk News Update ---
-        headlines = fetch_coindesk_headlines(limit=5)
-        if headlines and "No CoinDesk" not in headlines:
-            news_tweet = f"📰 CoinDesk News:\n{headlines}\n#crypto #news"
-            post_tweet(client, news_tweet)
-        else:
-            print("[WARN] No valid headlines to post.")
+        # RSS Feeds to fetch news from
+        rss_feeds = [
+            "https://feeds.feedburner.com/CoinDesk",  # CoinDesk
+            "https://cointelegraph.com/rss",          # CoinTelegraph
+            "https://cryptoslate.com/feed/"           # CryptoSlate
+        ]
+
+        # Fetch combined news headlines from all 3 sources
+        headlines = fetch_combined_crypto_news(rss_feeds, max_headlines=10)
+        print("[INFO] Combined Headlines:\n", headlines)
+
+        news_tweet = f"📰 Top Crypto News:\n{headlines}\n#crypto #news"
+        post_tweet(client, news_tweet)
 
         print("[INFO] Bot run completed.")
 
