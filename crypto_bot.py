@@ -1,18 +1,16 @@
 import os
 import requests
 import tweepy
+import random
+from bs4 import BeautifulSoup
 import traceback
 
+# Load Twitter client using credentials from environment variables
 def load_twitter_client():
     consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
     consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
     access_token = os.getenv("TWITTER_ACCESS_TOKEN")
     access_token_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
-
-    print("DEBUG: consumer_key set? ", bool(consumer_key))
-    print("DEBUG: consumer_secret set? ", bool(consumer_secret))
-    print("DEBUG: access_token set? ", bool(access_token))
-    print("DEBUG: access_token_secret set? ", bool(access_token_secret))
 
     if not all([consumer_key, consumer_secret, access_token, access_token_secret]):
         missing = [name for name, val in [
@@ -31,6 +29,7 @@ def load_twitter_client():
     )
     return client
 
+# Fetch current price and 24h change from CoinGecko
 def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     url = "https://api.coingecko.com/api/v3/simple/price"
     params = {
@@ -39,13 +38,11 @@ def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
         "include_24hr_change": "true"
     }
     resp = requests.get(url, params=params, timeout=10)
-    print("DEBUG: CoinGecko status:", resp.status_code)
-    text = resp.text
-    print("DEBUG: CoinGecko resp text (short):", text[:200])
     resp.raise_for_status()
     data = resp.json()
     return data
 
+# Format a tweet string based on fetched crypto data
 def format_tweet(data):
     lines = ["📈 Daily Crypto Update"]
     for coin, coin_info in data.items():
@@ -58,25 +55,55 @@ def format_tweet(data):
     lines.append("#crypto #Bitcoin #Ethereum")
     return "\n".join(lines)
 
+# Fetch top headlines from a crypto news website
+def fetch_headlines(url):
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    headlines = [h.get_text(strip=True) for h in soup.find_all('h2')]
+    return headlines[:5]  # Limit to top 5 headlines
+
+# Get a random headline from a list of crypto news websites
+def get_random_headline():
+    urls = [
+        'https://cointelegraph.com/',
+        'https://www.coindesk.com/',
+        'https://decrypt.co/',
+        'https://beincrypto.com/',
+        'https://u.today/'
+    ]
+    url = random.choice(urls)
+    headlines = fetch_headlines(url)
+    return random.choice(headlines) if headlines else None
+
+# Post a tweet using the Tweepy client
 def post_tweet(client, text):
     try:
-        resp = client.create_tweet(text=text, user_auth=True)
+        resp = client.create_tweet(text=text)
         print("Tweet posted, response:", resp)
     except Exception as e:
         print("Error posting tweet:", e)
         traceback.print_exc()
 
+# Main function to execute the bot's tasks
 def main():
     try:
         client = load_twitter_client()
-        crypto = fetch_crypto_prices()
-        tweet_text = format_tweet(crypto)
+        crypto_data = fetch_crypto_prices()
+        tweet_text = format_tweet(crypto_data)
         print("Tweet content:\n", tweet_text)
         post_tweet(client, tweet_text)
+
+        headline = get_random_headline()
+        if headline:
+            headline_tweet = f"📰 Crypto News: {headline} #CryptoNews"
+            print("Headline tweet content:\n", headline_tweet)
+            post_tweet(client, headline_tweet)
+        else:
+            print("No headlines found to post.")
+
     except Exception as e:
         print("Fatal error in main:", e)
         traceback.print_exc()
-        exit(1)
 
 if __name__ == "__main__":
     main()
