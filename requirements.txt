@@ -2,3 +2,4 @@ requests
 tweepy
 crypto-news-api
 beautifulsoup4
+feedparser
