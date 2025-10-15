@@ -41,32 +41,37 @@ def fetch_headline_and_summary(rss_url):
 
     entry = feed.entries[0]
     title = entry.title.strip()
-    # Try 'summary' or fallback to 'description'
     summary = entry.summary if "summary" in entry else (entry.get("description") or "")
     return title, summary
 
-def create_tweet_text(title, summary, hashtags="#crypto #news"):
-    # Reserve chars for hashtags and buffer
-    max_length = 280 - len(hashtags) - 5  # emoji, spaces, line breaks
+def create_tweet_text(title, summary, hashtags="#crypto #news", max_length=250):
+    # Compose initial tweet text without trimming
+    base_text = f"📰 {title}\n\n{summary}\n\n{hashtags}"
 
-    full_text = f"📰 {title}\n\n{summary}"
+    if len(base_text) <= max_length:
+        return base_text
 
-    if len(full_text) > max_length:
-        allowed_summary_length = max_length - len(f"📰 {title}\n\n") - 3  # for "..."
-        summary_truncated = summary[:allowed_summary_length].rstrip() + "..."
-        full_text = f"📰 {title}\n\n{summary_truncated}"
+    # If too long, truncate the summary
+    # Calculate allowed length for summary:
+    reserved = len(f"📰 {title}\n\n\n\n{hashtags}")  # newlines included
+    allowed_summary_len = max_length - reserved - 3  # 3 for "..."
 
-    full_text = f"{full_text}\n\n{hashtags}"
-    return full_text
+    if allowed_summary_len < 0:
+        # Title + hashtags alone exceed max_length, truncate title instead
+        allowed_title_len = max_length - len(f"📰 \n\n\n\n{hashtags}") - 3
+        title_truncated = title[:allowed_title_len].rstrip() + "..."
+        return f"📰 {title_truncated}\n\n{hashtags}"
+
+    summary_truncated = summary[:allowed_summary_len].rstrip() + "..."
+    tweet = f"📰 {title}\n\n{summary_truncated}\n\n{hashtags}"
+    return tweet
 
 def post_tweet(client, text):
     try:
-        if len(text) > 280:
-            print("[WARN] Tweet too long, trimming...")
-            text = text[:275] + "…"
-        print("[INFO] Posting tweet...")
+        print(f"[INFO] Tweet length: {len(text)}")
+        print(f"[INFO] Tweet content:\n{text}\n")
         resp = client.create_tweet(text=text)
-        print("[INFO] Tweet posted:", resp)
+        print("[INFO] Tweet posted, response:", resp)
     except Exception as e:
         print("[ERROR] Error posting tweet:", e)
         traceback.print_exc()
@@ -96,7 +101,6 @@ def main():
         else:
             tweet_text = create_tweet_text(headline, summary)
 
-        print("[INFO] Tweet content:\n", tweet_text)
         post_tweet(client, tweet_text)
 
         print("[INFO] Bot run completed.")
