@@ -63,14 +63,23 @@ def format_tweet(data):
     print("[DEBUG] Formatted price tweet:\n", tweet)
     return tweet
 
-# Fetch latest headlines from CoinDesk RSS
+# Fetch latest headlines from CoinDesk's RSS feed
 def fetch_coindesk_headlines(limit=5):
     print("[INFO] Fetching CoinDesk headlines...")
-    rss_url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    # More stable CoinDesk RSS feed
+    rss_url = "https://feeds.feedburner.com/CoinDesk"
+
+    # Optional: set user-agent in case host blocks bots
+    feedparser.USER_AGENT = "Mozilla/5.0 (compatible; CryptoBot/1.0; +https://yourproject.com)"
     feed = feedparser.parse(rss_url)
 
+    print("[DEBUG] Feed status:", feed.get("status", "unknown"))
+    print("[DEBUG] Feed bozo:", feed.bozo)
+    if feed.bozo:
+        print("[ERROR] Feed parsing error:", feed.bozo_exception)
+    print("[DEBUG] Total entries found:", len(feed.entries))
+
     if not feed.entries:
-        print("[WARN] No CoinDesk entries found.")
         return "No CoinDesk news available."
 
     headlines = []
@@ -78,11 +87,9 @@ def fetch_coindesk_headlines(limit=5):
         print("[DEBUG] Headline:", entry.title)
         headlines.append(f"• {entry.title}")
     
-    headline_text = "\n".join(headlines)
-    print("[DEBUG] Formatted headlines:\n", headline_text)
-    return headline_text
+    return "\n".join(headlines)
 
-# Post a tweet
+# Post a tweet using the Twitter API client
 def post_tweet(client, text):
     try:
         if len(text) > 280:
@@ -95,28 +102,28 @@ def post_tweet(client, text):
         print("[ERROR] Error posting tweet:", e)
         traceback.print_exc()
 
-# Main logic
+# Main function
 def main():
     try:
         print("[INFO] Starting Crypto Twitter Bot")
         
         client = load_twitter_client()
 
-        # --- Price Update ---
+        # --- Post Crypto Price Update ---
         crypto_data = fetch_crypto_prices()
         if crypto_data:
             tweet_text = format_tweet(crypto_data)
             post_tweet(client, tweet_text)
         else:
-            print("[ERROR] No crypto data available, skipping price tweet.")
+            print("[WARN] No crypto data to tweet.")
 
-        # --- CoinDesk News Update ---
+        # --- Post CoinDesk News Update ---
         headlines = fetch_coindesk_headlines(limit=5)
         if headlines and "No CoinDesk" not in headlines:
             news_tweet = f"📰 CoinDesk News:\n{headlines}\n#crypto #news"
             post_tweet(client, news_tweet)
         else:
-            print("[ERROR] No news headlines to post.")
+            print("[WARN] No valid headlines to post.")
 
         print("[INFO] Bot run completed.")
 
