@@ -26,20 +26,38 @@ def load_twitter_client():
     )
     return client
 
-def fetch_first_headline(rss_url):
-    print(f"[INFO] Fetching headline from {rss_url}")
+def fetch_headline_and_summary(rss_url):
+    print(f"[INFO] Fetching headline and summary from {rss_url}")
     feedparser.USER_AGENT = "Mozilla/5.0 (compatible; CryptoBot/1.0)"
     feed = feedparser.parse(rss_url)
 
     if feed.bozo:
         print(f"[ERROR] Feed parsing error: {feed.bozo_exception}")
-        return None
+        return None, None
 
     if not feed.entries:
         print("[WARN] No entries found in feed.")
-        return None
+        return None, None
 
-    return feed.entries[0].title.strip()
+    entry = feed.entries[0]
+    title = entry.title.strip()
+    # Try 'summary' or fallback to 'description'
+    summary = entry.summary if "summary" in entry else (entry.get("description") or "")
+    return title, summary
+
+def create_tweet_text(title, summary, hashtags="#crypto #news"):
+    # Reserve chars for hashtags and buffer
+    max_length = 280 - len(hashtags) - 5  # emoji, spaces, line breaks
+
+    full_text = f"📰 {title}\n\n{summary}"
+
+    if len(full_text) > max_length:
+        allowed_summary_length = max_length - len(f"📰 {title}\n\n") - 3  # for "..."
+        summary_truncated = summary[:allowed_summary_length].rstrip() + "..."
+        full_text = f"📰 {title}\n\n{summary_truncated}"
+
+    full_text = f"{full_text}\n\n{hashtags}"
+    return full_text
 
 def post_tweet(client, text):
     try:
@@ -55,7 +73,7 @@ def post_tweet(client, text):
 
 def main():
     try:
-        print("[INFO] Starting single headline crypto news bot")
+        print("[INFO] Starting crypto news headline + summary bot")
 
         client = load_twitter_client()
 
@@ -65,18 +83,20 @@ def main():
             "https://cryptoslate.com/feed/"
         ]
 
-        # Try each feed in order until we get a headline
         headline = None
+        summary = None
         for rss in rss_feeds:
-            headline = fetch_first_headline(rss)
-            if headline:
+            headline, summary = fetch_headline_and_summary(rss)
+            if headline and summary:
                 break
 
         if not headline:
             print("[WARN] No headline found from any feed.")
-            headline = "No crypto news available at the moment."
+            tweet_text = "No crypto news available at the moment. #crypto #news"
+        else:
+            tweet_text = create_tweet_text(headline, summary)
 
-        tweet_text = f"📰 {headline}\n#crypto #news"
+        print("[INFO] Tweet content:\n", tweet_text)
         post_tweet(client, tweet_text)
 
         print("[INFO] Bot run completed.")
