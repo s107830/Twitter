@@ -4,15 +4,11 @@ import tweepy
 import feedparser
 import traceback
 
-# --- Clean HTML (remove images, tags, extra spaces) ---
 def clean_html(raw_html):
-    # Remove <img> tags
     raw_html = re.sub(r'<img[^>]+>', '', raw_html)
-    # Remove all other HTML tags
     clean_text = re.sub(r'<[^>]+>', '', raw_html)
     return clean_text.strip()
 
-# --- Load Twitter client ---
 def load_twitter_client():
     consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
     consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
@@ -35,59 +31,67 @@ def load_twitter_client():
         access_token_secret=access_token_secret,
     )
 
-# --- Fetch headline and clean summary ---
 def fetch_headline_and_summary(rss_url):
     print(f"[INFO] Fetching from: {rss_url}")
     feed = feedparser.parse(rss_url)
 
+    print("[DEBUG] feed.status:", feed.get("status"))
+    print("[DEBUG] feed.bozo:", feed.bozo)
     if feed.bozo:
-        print(f"[ERROR] Failed to parse feed: {feed.bozo_exception}")
-        return None, None
+        print("[ERROR] feed parsing error:", feed.bozo_exception)
+    print("[DEBUG] entries count:", len(feed.entries))
 
     if not feed.entries:
-        print("[WARN] No articles found.")
         return None, None
 
     entry = feed.entries[0]
-    title = entry.title.strip()
-    raw_summary = entry.get("summary", "") or entry.get("description", "")
+    title = entry.title.strip() if hasattr(entry, "title") else None
+    raw_summary = getattr(entry, "summary", "") or getattr(entry, "description", "")
     summary = clean_html(raw_summary)
     return title, summary
 
-# --- Format tweet within 250 characters ---
 def create_tweet_text(title, summary, hashtags="#crypto #news", max_length=250):
-    text = f"📰 {title}\n\n{summary}\n\n{hashtags}"
+    if summary:
+        text = f"📰 {title}\n\n{summary}\n\n{hashtags}"
+    else:
+        text = f"📰 {title}\n\n{hashtags}"
 
     if len(text) <= max_length:
         return text
 
-    # Truncate summary if too long
-    reserved = len(f"📰 {title}\n\n\n\n{hashtags}")
-    allowed_summary = max_length - reserved - 3  # for "..."
-    if allowed_summary < 0:
-        # Even the title + hashtags too long
-        allowed_title = max_length - len(f"📰 \n\n\n\n{hashtags}") - 3
-        title = title[:allowed_title].rstrip() + "..."
-        return f"📰 {title}\n\n{hashtags}"
+    # If too long, try truncating summary
+    if summary:
+        reserved = len(f"📰 {title}\n\n\n\n{hashtags}")
+        allowed_summary = max_length - reserved - 3
+        if allowed_summary > 0:
+            summary = summary[:allowed_summary].rstrip() + "..."
+            return f"📰 {title}\n\n{summary}\n\n{hashtags}"
+        else:
+            # Summary has no room; drop it altogether
+            allowed_title = max_length - len(f"📰 \n\n{hashtags}") - 3
+            title = title[:allowed_title].rstrip() + "..."
+            return f"📰 {title}\n\n{hashtags}"
+    else:
+        # No summary, just title + hashtags already fits or truncated
+        if len(text) > max_length:
+            allowed_title = max_length - len(f"📰 \n\n{hashtags}") - 3
+            title = title[:allowed_title].rstrip() + "..."
+            return f"📰 {title}\n\n{hashtags}"
+        return text
 
-    summary = summary[:allowed_summary].rstrip() + "..."
-    return f"📰 {title}\n\n{summary}\n\n{hashtags}"
-
-# --- Post the tweet ---
 def post_tweet(client, text):
     try:
-        print(f"[INFO] Posting tweet ({len(text)} characters):")
-        print(text)
-        response = client.create_tweet(text=text)
-        print("[SUCCESS] Tweet posted:", response.data.get("id"))
+        print(f"[INFO] Tweet length: {len(text)}")
+        print("[INFO] Tweet content:\n", text)
+        resp = client.create_tweet(text=text)
+        print("[SUCCESS] Tweet posted:", resp)
     except Exception as e:
         print("[ERROR] Failed to post tweet:", e)
         traceback.print_exc()
 
-# --- Main workflow ---
 def main():
     try:
-        print("[INFO] Crypto News Bot Started")
+        print("[INFO] Bot started")
 
         client = load_twitter_client()
 
@@ -98,13 +102,15 @@ def main():
         ]
 
         title, summary = None, None
-        for feed in rss_feeds:
-            title, summary = fetch_headline_and_summary(feed)
-            if title and summary:
+        for url in rss_feeds:
+            t, s = fetch_headline_and_summary(url)
+            print("[DEBUG] got:", t, "| summary length:", len(s) if s else 0)
+            if t:
+                title, summary = t, s
                 break
 
         if not title:
-            print("[WARN] No headline found.")
+            print("[WARN] No headline found at all")
             tweet = "No crypto news available right now. #crypto #news"
         else:
             tweet = create_tweet_text(title, summary)
