@@ -5,7 +5,6 @@ import random
 from bs4 import BeautifulSoup
 import traceback
 
-# Load Twitter client using credentials from environment variables
 def load_twitter_client():
     consumer_key = os.getenv("TWITTER_CONSUMER_KEY")
     consumer_secret = os.getenv("TWITTER_CONSUMER_SECRET")
@@ -29,7 +28,6 @@ def load_twitter_client():
     )
     return client
 
-# Fetch current price and 24h change from CoinGecko
 def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     url = "https://api.coingecko.com/api/v3/simple/price"
     params = {
@@ -42,7 +40,6 @@ def fetch_crypto_prices(ids=("bitcoin", "ethereum"), vs_currency="usd"):
     data = resp.json()
     return data
 
-# Format a tweet string based on fetched crypto data
 def format_tweet(data):
     lines = ["📈 Daily Crypto Update"]
     for coin, coin_info in data.items():
@@ -55,14 +52,12 @@ def format_tweet(data):
     lines.append("#crypto #Bitcoin #Ethereum")
     return "\n".join(lines)
 
-# Fetch top headlines from a crypto news website
 def fetch_headlines(url):
     response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
     headlines = [h.get_text(strip=True) for h in soup.find_all('h2')]
     return headlines[:5]  # Limit to top 5 headlines
 
-# Get a random headline from a list of crypto news websites
 def get_random_headline():
     urls = [
         'https://cointelegraph.com/',
@@ -75,7 +70,6 @@ def get_random_headline():
     headlines = fetch_headlines(url)
     return random.choice(headlines) if headlines else None
 
-# Post a tweet using the Tweepy client
 def post_tweet(client, text):
     try:
         resp = client.create_tweet(text=text)
@@ -84,7 +78,6 @@ def post_tweet(client, text):
         print("Error posting tweet:", e)
         traceback.print_exc()
 
-# Main function to execute the bot's tasks
 def main():
     try:
         client = load_twitter_client()
