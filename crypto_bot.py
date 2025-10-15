@@ -1,7 +1,7 @@
 import os
 import requests
 import tweepy
-import random
+import feedparser
 import traceback
 
 # Load Twitter API credentials from environment variables
@@ -54,28 +54,18 @@ def format_tweet(data):
     lines.append("#crypto #Bitcoin #Ethereum")
     return "\n".join(lines)
 
-# Fetch the latest crypto news headlines using NewsData.io API
-def fetch_crypto_news(api_key, query="crypto", language="en"):
-    url = "https://newsdata.io/api/1/news"
-    params = {
-        "apikey": api_key,
-        "q": query,
-        "language": language,
-        "category": "crypto"
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Error fetching news: {response.status_code}")
-        return None
+# Fetch latest headlines from CoinDesk's RSS feed
+def fetch_coindesk_headlines(limit=5):
+    rss_url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    feed = feedparser.parse(rss_url)
 
-# Extract and format the top 5 headlines from the news data
-def extract_headlines(news_data):
-    if news_data and "results" in news_data:
-        headlines = [article["title"] for article in news_data["results"]]
-        return "\n".join(headlines[:5])  # Limit to top 5 headlines
-    return "No news available."
+    if not feed.entries:
+        return "No CoinDesk news available."
+
+    headlines = []
+    for entry in feed.entries[:limit]:
+        headlines.append(f"• {entry.title}")
+    return "\n".join(headlines)
 
 # Post a tweet using the Twitter API client
 def post_tweet(client, text):
@@ -89,16 +79,20 @@ def post_tweet(client, text):
 # Main function to fetch data and post tweets
 def main():
     try:
+        # Load Twitter client
         client = load_twitter_client()
+
+        # --- Post Crypto Prices ---
         crypto_data = fetch_crypto_prices()
         tweet_text = format_tweet(crypto_data)
-        print("Tweet content:\n", tweet_text)
+        print("Tweeting price update:\n", tweet_text)
         post_tweet(client, tweet_text)
 
-        news_data = fetch_crypto_news("pub_19d1c9837f4e4a0c96da1e25d79e7a54")
-        headlines = extract_headlines(news_data)
-        print("Headlines:\n", headlines)
-        post_tweet(client, f"📰 Crypto News:\n{headlines}")
+        # --- Post CoinDesk Headlines ---
+        headlines = fetch_coindesk_headlines(limit=5)
+        news_tweet = f"📰 CoinDesk News:\n{headlines}\n#crypto #news"
+        print("Tweeting news update:\n", news_tweet)
+        post_tweet(client, news_tweet)
 
     except Exception as e:
         print("Fatal error in main:", e)
