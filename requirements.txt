@@ -1,2 +1,3 @@
 requests
 tweepy
+crypto-news-api
