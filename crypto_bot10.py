@@ -9,8 +9,8 @@ import traceback
 def clean_html(raw_html):
     if not raw_html:
         return ""
-    raw_html = re.sub(r'<img[^>]+>', '', raw_html)  # remove images
-    raw_html = re.sub(r'<a[^>]+>(.*?)</a>', r'\1', raw_html)  # keep link text
+    raw_html = re.sub(r'<img[^>]+>', '', raw_html)
+    raw_html = re.sub(r'<a[^>]+>(.*?)</a>', r'\1', raw_html)
     clean_text = re.sub(r'<[^>]+>', '', raw_html)
     clean_text = re.sub(r'\s+', ' ', clean_text)
     return clean_text.strip()
@@ -38,9 +38,9 @@ def load_twitter_client():
         access_token_secret=access_token_secret,
     )
 
-# ---------- Fetch latest headline + summary ----------
-def fetch_headline_and_summary(rss_url):
-    print(f"[INFO] Fetching from: {rss_url}")
+# ---------- Fetch news with filter ----------
+def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
+    print(f"[INFO] Checking feed: {rss_url}")
     feed = feedparser.parse(rss_url)
 
     if feed.bozo:
@@ -48,49 +48,52 @@ def fetch_headline_and_summary(rss_url):
         return None, None
 
     if not feed.entries:
-        print(f"[WARN] No entries found in {rss_url}")
         return None, None
 
-    entry = feed.entries[0]
-    title = getattr(entry, "title", "").strip()
+    # Check up to 5 latest entries
+    for entry in feed.entries[:5]:
+        title = getattr(entry, "title", "").strip()
+        summary_fields = [
+            getattr(entry, "summary", ""),
+            getattr(entry, "description", ""),
+            getattr(entry, "content", [{}])[0].get("value", "") if hasattr(entry, "content") else ""
+        ]
+        summary = next((clean_html(s) for s in summary_fields if s), "")
 
-    # Try multiple possible summary fields
-    summary_fields = [
-        getattr(entry, "summary", ""),
-        getattr(entry, "description", ""),
-        getattr(entry, "content", [{}])[0].get("value", "") if hasattr(entry, "content") else ""
-    ]
-    summary = next((clean_html(s) for s in summary_fields if s), "")
+        text = f"{title} {summary}".lower()
 
-    return title, summary
+        # Match either crypto or market/trump related terms
+        if any(k in text for k in crypto_keywords + market_keywords):
+            print(f"[MATCH] Relevant news: {title}")
+            return title, summary
 
-# ---------- Create short tweet ----------
-def create_tweet_text(title, summary, hashtags="#crypto #news", max_length=260):
+    return None, None
+
+# ---------- Create tweet ----------
+def create_tweet_text(title, summary, hashtags="#crypto #markets #news", max_length=260):
     if not title:
-        return "No crypto news available right now. #crypto #news"
+        return "No relevant crypto or market news right now. #crypto #news"
 
     title = title.strip()
     summary = summary.strip() if summary else ""
     base = f"📰 {title}"
 
-    # Try to include summary if possible within limit
     if summary:
         text = f"{base}\n\n{summary}\n\n{hashtags}"
     else:
         text = f"{base}\n\n{hashtags}"
 
-    # Truncate to total max length (260 chars)
+    # Truncate total length to 260 characters
     if len(text) > max_length:
-        # leave space for hashtags
-        reserve_for_tags = len(f"\n\n{hashtags}")
-        allowed = max_length - reserve_for_tags - len("📰 ") - 3
+        reserve = len(f"\n\n{hashtags}")
+        allowed = max_length - reserve - len("📰 ") - 3
         combined = f"{title}. {summary}" if summary else title
         trimmed = combined[:allowed].rstrip() + "..."
         text = f"📰 {trimmed}\n\n{hashtags}"
 
     return text
 
-# ---------- Post to Twitter ----------
+# ---------- Post tweet ----------
 def post_tweet(client, text):
     try:
         print(f"[INFO] Tweet length: {len(text)}")
@@ -124,11 +127,22 @@ def main():
             "https://zycrypto.com/feed/"
         ]
 
-        random.shuffle(rss_feeds)
+        # 🎯 Keyword lists
+        crypto_keywords = [
+            "crypto", "bitcoin", "ethereum", "altcoin", "btc", "eth",
+            "blockchain", "web3", "defi", "nft"
+        ]
+        market_keywords = [
+            "trump", "biden", "election", "market", "stocks", "nasdaq",
+            "s&p", "dow jones", "price", "rally", "selloff", "economy",
+            "inflation", "interest rate", "fed", "policy"
+        ]
 
+        random.shuffle(rss_feeds)
         title, summary = None, None
+
         for url in rss_feeds:
-            t, s = fetch_headline_and_summary(url)
+            t, s = fetch_relevant_news(url, crypto_keywords, market_keywords)
             if t:
                 title, summary = t, s
                 break
