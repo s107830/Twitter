@@ -7,8 +7,12 @@ import traceback
 
 # ---------- Clean HTML ----------
 def clean_html(raw_html):
-    raw_html = re.sub(r'<img[^>]+>', '', raw_html)
+    if not raw_html:
+        return ""
+    raw_html = re.sub(r'<img[^>]+>', '', raw_html)  # remove images
+    raw_html = re.sub(r'<a[^>]+>(.*?)</a>', r'\1', raw_html)  # keep link text
     clean_text = re.sub(r'<[^>]+>', '', raw_html)
+    clean_text = re.sub(r'\s+', ' ', clean_text)
     return clean_text.strip()
 
 # ---------- Twitter Client ----------
@@ -34,7 +38,7 @@ def load_twitter_client():
         access_token_secret=access_token_secret,
     )
 
-# ---------- Fetch latest headline ----------
+# ---------- Fetch latest headline + summary ----------
 def fetch_headline_and_summary(rss_url):
     print(f"[INFO] Fetching from: {rss_url}")
     feed = feedparser.parse(rss_url)
@@ -49,30 +53,42 @@ def fetch_headline_and_summary(rss_url):
 
     entry = feed.entries[0]
     title = getattr(entry, "title", "").strip()
-    raw_summary = getattr(entry, "summary", "") or getattr(entry, "description", "")
-    summary = clean_html(raw_summary)
+
+    # Try multiple possible summary fields
+    summary_fields = [
+        getattr(entry, "summary", ""),
+        getattr(entry, "description", ""),
+        getattr(entry, "content", [{}])[0].get("value", "") if hasattr(entry, "content") else ""
+    ]
+    summary = next((clean_html(s) for s in summary_fields if s), "")
+
     return title, summary
 
-# ---------- Create tweet ----------
-def create_tweet_text(title, summary, hashtags="#crypto #news", max_length=250):
+# ---------- Create short tweet ----------
+def create_tweet_text(title, summary, hashtags="#crypto #news", max_length=260):
+    if not title:
+        return "No crypto news available right now. #crypto #news"
+
+    title = title.strip()
+    summary = summary.strip() if summary else ""
+    base = f"📰 {title}"
+
+    # Try to include summary if possible within limit
     if summary:
-        text = f"📰 {title}\n\n{summary}\n\n{hashtags}"
+        text = f"{base}\n\n{summary}\n\n{hashtags}"
     else:
-        text = f"📰 {title}\n\n{hashtags}"
+        text = f"{base}\n\n{hashtags}"
 
-    if len(text) <= max_length:
-        return text
+    # Truncate to total max length (260 chars)
+    if len(text) > max_length:
+        # leave space for hashtags
+        reserve_for_tags = len(f"\n\n{hashtags}")
+        allowed = max_length - reserve_for_tags - len("📰 ") - 3
+        combined = f"{title}. {summary}" if summary else title
+        trimmed = combined[:allowed].rstrip() + "..."
+        text = f"📰 {trimmed}\n\n{hashtags}"
 
-    # If too long, truncate summary or title
-    reserved = len(f"📰 {title}\n\n\n\n{hashtags}")
-    allowed_summary = max_length - reserved - 3
-    if summary and allowed_summary > 0:
-        summary = summary[:allowed_summary].rstrip() + "..."
-        return f"📰 {title}\n\n{summary}\n\n{hashtags}"
-
-    allowed_title = max_length - len(f"📰 \n\n{hashtags}") - 3
-    title = title[:allowed_title].rstrip() + "..."
-    return f"📰 {title}\n\n{hashtags}"
+    return text
 
 # ---------- Post to Twitter ----------
 def post_tweet(client, text):
@@ -92,7 +108,6 @@ def main():
 
         client = load_twitter_client()
 
-        # ✅ Updated RSS feed list
         rss_feeds = [
             "https://feeds.feedburner.com/CoinDesk",
             "https://cointelegraph.com/rss",
@@ -109,7 +124,6 @@ def main():
             "https://zycrypto.com/feed/"
         ]
 
-        # Randomize order to reduce repetition
         random.shuffle(rss_feeds)
 
         title, summary = None, None
@@ -119,12 +133,7 @@ def main():
                 title, summary = t, s
                 break
 
-        if not title:
-            print("[WARN] No headline found at all")
-            tweet = "No crypto news available right now. #crypto #news"
-        else:
-            tweet = create_tweet_text(title, summary)
-
+        tweet = create_tweet_text(title, summary)
         post_tweet(client, tweet)
 
     except Exception as e:
