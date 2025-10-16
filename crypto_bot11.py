@@ -5,6 +5,11 @@ import tweepy
 import feedparser
 import traceback
 
+# Optional: Set this flag if you have Premium Basic
+USE_LONG_POST = True  
+LONG_POST_CHAR_LIMIT = 25000  # Maximum characters for Premium Basic long posts
+STANDARD_CHAR_LIMIT = 280     # Fallback limit if not long-post capable
+
 # ---------- Clean HTML ----------
 def clean_html(raw_html):
     if not raw_html:
@@ -40,9 +45,9 @@ def load_twitter_client():
 
 # ---------- Fetch news with filter ----------
 def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
+    # same as yours
     print(f"[INFO] Checking feed: {rss_url}")
     feed = feedparser.parse(rss_url)
-
     if feed.bozo:
         print(f"[WARN] Parse issue with {rss_url}: {feed.bozo_exception}")
         return None, None
@@ -50,7 +55,6 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
     if not feed.entries:
         return None, None
 
-    # Check up to 5 latest entries
     for entry in feed.entries[:5]:
         title = getattr(entry, "title", "").strip()
         summary_fields = [
@@ -61,48 +65,100 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
         summary = next((clean_html(s) for s in summary_fields if s), "")
 
         text = f"{title} {summary}".lower()
-
-        # Match either crypto or market/trump related terms
         if any(k in text for k in crypto_keywords + market_keywords):
             print(f"[MATCH] Relevant news: {title}")
             return title, summary
 
     return None, None
 
-# ---------- Create tweet ----------
-def create_tweet_text(title, summary, hashtags="#crypto #markets #news", max_length=260):
+# ---------- Create tweet text with more hashtags ----------
+def create_tweet_text(title, summary, extra_hashtags=None):
     if not title:
         return "No relevant crypto or market news right now. #crypto #news"
 
     title = title.strip()
     summary = summary.strip() if summary else ""
-    base = f"📰 {title}"
+
+    # Base hashtags
+    hashtags = ["#crypto", "#markets", "#news"]
+
+    # Add extra related tags automatically
+    if extra_hashtags:
+        hashtags += extra_hashtags
+
+    # Remove duplicates
+    hashtags = list(dict.fromkeys(hashtags))
+
+    hashtag_text = " ".join(hashtags)
 
     if summary:
-        text = f"{base}\n\n{summary}\n\n{hashtags}"
+        text = f"📰 {title}\n\n{summary}\n\n{hashtag_text}"
     else:
-        text = f"{base}\n\n{hashtags}"
+        text = f"📰 {title}\n\n{hashtag_text}"
 
-    # Truncate total length to 260 characters
-    if len(text) > max_length:
-        reserve = len(f"\n\n{hashtags}")
-        allowed = max_length - reserve - len("📰 ") - 3
-        combined = f"{title}. {summary}" if summary else title
-        trimmed = combined[:allowed].rstrip() + "..."
-        text = f"📰 {trimmed}\n\n{hashtags}"
+    # If using long posts and it's under that limit, return full
+    if USE_LONG_POST and len(text) <= LONG_POST_CHAR_LIMIT:
+        return text
+    else:
+        # Fallback / or we need to truncate
+        limit = LONG_POST_CHAR_LIMIT if USE_LONG_POST else STANDARD_CHAR_LIMIT
+        if len(text) <= limit:
+            return text
+        else:
+            # Truncate summary part to fit
+            # Reserve for title + hashtags + some buffer
+            reserve = len(f"📰 {title}\n\n{hashtag_text}") + 5
+            allowed_summary = limit - reserve
+            if allowed_summary < 0:
+                # Title + hashtags already too big => truncate title
+                trimmed_title = title[:limit - len(f"📰 ... {hashtag_text}") - 5].rstrip() + "..."
+                return f"📰 {trimmed_title}\n\n{hashtag_text}"
+            else:
+                trimmed_summary = summary[:allowed_summary].rstrip() + "..."
+                return f"📰 {title}\n\n{trimmed_summary}\n\n{hashtag_text}"
 
-    return text
-
-# ---------- Post tweet ----------
+# ---------- Post tweet or thread ----------
 def post_tweet(client, text):
     try:
-        print(f"[INFO] Tweet length: {len(text)}")
-        print("[INFO] Tweet content:\n", text)
-        resp = client.create_tweet(text=text)
-        print("[SUCCESS] Tweet posted:", resp)
+        print(f"[INFO] Tweet content length: {len(text)}")
+        if USE_LONG_POST:
+            # Try direct post (premium account)
+            resp = client.create_tweet(text=text)
+            print("[SUCCESS] Tweet posted (long post):", resp)
+        else:
+            # Fallback: if too long, split into thread
+            if len(text) <= STANDARD_CHAR_LIMIT:
+                resp = client.create_tweet(text=text)
+                print("[SUCCESS] Tweet posted:", resp)
+            else:
+                print("[INFO] Splitting into thread because too long")
+                parts = split_into_parts(text, STANDARD_CHAR_LIMIT)
+                prev_id = None
+                for part in parts:
+                    if prev_id is None:
+                        resp = client.create_tweet(text=part)
+                    else:
+                        resp = client.create_tweet(text=part, in_reply_to_tweet_id=prev_id)
+                    prev_id = resp.data["id"]
+                print("[SUCCESS] Thread posted.")
     except Exception as e:
-        print("[ERROR] Failed to post tweet:", e)
+        print("[ERROR] Failed to post:", e)
         traceback.print_exc()
+
+def split_into_parts(text, limit):
+    # Split by sentences or by words so threads read well
+    words = text.split()
+    parts = []
+    current = ""
+    for w in words:
+        if len(current) + len(w) + 1 <= limit:
+            current += (" " if current else "") + w
+        else:
+            parts.append(current)
+            current = w
+    if current:
+        parts.append(current)
+    return parts
 
 # ---------- Main ----------
 def main():
@@ -112,22 +168,9 @@ def main():
         client = load_twitter_client()
 
         rss_feeds = [
-            "https://feeds.feedburner.com/CoinDesk",
-            "https://cointelegraph.com/rss",
-            "https://cryptoslate.com/feed/",
-            "https://bitcoinmagazine.com/feed/",
-            "https://cryptonews.com/news/feed/",
-            "https://www.ccn.com/news/crypto-news/feeds/",
-            "https://blockchain.news/feed",
-            "https://ambcrypto.com/feed/",
-            "https://u.today/rss",
-            "https://coingape.com/feed/",
-            "https://cryptopotato.com/feed/",
-            "https://newsbtc.com/feed/",
-            "https://zycrypto.com/feed/"
+            # your feeds...
         ]
 
-        # 🎯 Keyword lists
         crypto_keywords = [
             "crypto", "bitcoin", "ethereum", "altcoin", "btc", "eth",
             "blockchain", "web3", "defi", "nft"
@@ -138,6 +181,9 @@ def main():
             "inflation", "interest rate", "fed", "policy"
         ]
 
+        # Extra hashtags you might want
+        extra_tags = ["#Bitcoin", "#Ethereum", "#Altcoins", "#DeFi", "#Blockchain", "#CryptoNews"]
+
         random.shuffle(rss_feeds)
         title, summary = None, None
 
@@ -147,8 +193,8 @@ def main():
                 title, summary = t, s
                 break
 
-        tweet = create_tweet_text(title, summary)
-        post_tweet(client, tweet)
+        tweet_text = create_tweet_text(title, summary, extra_hashtags=extra_tags)
+        post_tweet(client, tweet_text)
 
     except Exception as e:
         print("[FATAL ERROR]", e)
