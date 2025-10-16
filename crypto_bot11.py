@@ -5,10 +5,10 @@ import tweepy
 import feedparser
 import traceback
 
-# Optional: Set this flag if you have Premium Basic
-USE_LONG_POST = True  
-LONG_POST_CHAR_LIMIT = 25000  # Maximum characters for Premium Basic long posts
-STANDARD_CHAR_LIMIT = 280     # Fallback limit if not long-post capable
+# You have premium basic → can post longer text
+USE_LONG_POST = True
+LONG_POST_CHAR_LIMIT = 25000
+STANDARD_CHAR_LIMIT = 280
 
 # ---------- Clean HTML ----------
 def clean_html(raw_html):
@@ -16,9 +16,9 @@ def clean_html(raw_html):
         return ""
     raw_html = re.sub(r'<img[^>]+>', '', raw_html)
     raw_html = re.sub(r'<a[^>]+>(.*?)</a>', r'\1', raw_html)
-    clean_text = re.sub(r'<[^>]+>', '', raw_html)
-    clean_text = re.sub(r'\s+', ' ', clean_text)
-    return clean_text.strip()
+    text = re.sub(r'<[^>]+>', '', raw_html)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 # ---------- Twitter Client ----------
 def load_twitter_client():
@@ -43,13 +43,31 @@ def load_twitter_client():
         access_token_secret=access_token_secret,
     )
 
+# ---------- Hashtag extraction ----------
+def extract_hashtags_from_text(text, min_len=2):
+    tags = set()
+    # Find existing hashtags
+    for tag in re.findall(r"#([A-Za-z0-9_]+)", text):
+        tags.add(tag)
+
+    # Find uppercase words (e.g. SHIB, BTC)
+    for w in re.findall(r"\b[A-Z]{2,}\b", text):
+        tags.add(w)
+
+    # Find multi-word proper names (e.g. "Shiba Inu") -> "ShibaInu"
+    for phrase in re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text):
+        tag = phrase.replace(" ", "")
+        tags.add(tag)
+
+    # Filter length
+    return {tag for tag in tags if len(tag) >= min_len}
+
 # ---------- Fetch news with filter ----------
 def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
-    # same as yours
     print(f"[INFO] Checking feed: {rss_url}")
     feed = feedparser.parse(rss_url)
     if feed.bozo:
-        print(f"[WARN] Parse issue with {rss_url}: {feed.bozo_exception}")
+        print(f"[WARN] Parse issue {rss_url}: {feed.bozo_exception}")
         return None, None
 
     if not feed.entries:
@@ -60,18 +78,17 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
         summary_fields = [
             getattr(entry, "summary", ""),
             getattr(entry, "description", ""),
-            getattr(entry, "content", [{}])[0].get("value", "") if hasattr(entry, "content") else ""
+            (entry.content[0].get("value", "") if hasattr(entry, "content") else "")
         ]
         summary = next((clean_html(s) for s in summary_fields if s), "")
-
-        text = f"{title} {summary}".lower()
+        text = (title + " " + summary).lower()
         if any(k in text for k in crypto_keywords + market_keywords):
-            print(f"[MATCH] Relevant news: {title}")
+            print(f"[MATCH] {title}")
             return title, summary
 
     return None, None
 
-# ---------- Create tweet text with more hashtags ----------
+# ---------- Create tweet text ----------
 def create_tweet_text(title, summary, extra_hashtags=None):
     if not title:
         return "No relevant crypto or market news right now. #crypto #news"
@@ -79,59 +96,69 @@ def create_tweet_text(title, summary, extra_hashtags=None):
     title = title.strip()
     summary = summary.strip() if summary else ""
 
-    # Base hashtags
-    hashtags = ["#crypto", "#markets", "#news"]
-
-    # Add extra related tags automatically
-    if extra_hashtags:
-        hashtags += extra_hashtags
-
-    # Remove duplicates
-    hashtags = list(dict.fromkeys(hashtags))
-
-    hashtag_text = " ".join(hashtags)
+    default_hashtags = ["crypto", "news"]
+    found = extract_hashtags_from_text(title + " " + summary)
+    # Combine all, but exclude duplicates
+    all_tags = default_hashtags + list(found)
+    # Format with “#” and dedupe preserving order
+    seen = set()
+    formatted = []
+    for tag in all_tags:
+        t = tag if tag.startswith("#") else "#" + tag
+        if t.lower() not in seen:
+            formatted.append(t)
+            seen.add(t.lower())
+    hashtag_text = " ".join(formatted)
 
     if summary:
         text = f"📰 {title}\n\n{summary}\n\n{hashtag_text}"
     else:
         text = f"📰 {title}\n\n{hashtag_text}"
 
-    # If using long posts and it's under that limit, return full
-    if USE_LONG_POST and len(text) <= LONG_POST_CHAR_LIMIT:
-        return text
-    else:
-        # Fallback / or we need to truncate
-        limit = LONG_POST_CHAR_LIMIT if USE_LONG_POST else STANDARD_CHAR_LIMIT
-        if len(text) <= limit:
+    # Decide whether to truncate
+    if USE_LONG_POST:
+        if len(text) <= LONG_POST_CHAR_LIMIT:
             return text
         else:
-            # Truncate summary part to fit
-            # Reserve for title + hashtags + some buffer
+            # need to trim summary
             reserve = len(f"📰 {title}\n\n{hashtag_text}") + 5
-            allowed_summary = limit - reserve
-            if allowed_summary < 0:
-                # Title + hashtags already too big => truncate title
-                trimmed_title = title[:limit - len(f"📰 ... {hashtag_text}") - 5].rstrip() + "..."
-                return f"📰 {trimmed_title}\n\n{hashtag_text}"
+            allowed = LONG_POST_CHAR_LIMIT - reserve
+            if allowed <= 0:
+                # even title + hashtags too big; trim title
+                max_title = LONG_POST_CHAR_LIMIT - len(f"📰 … {hashtag_text}") - 5
+                trimmed = title[:max_title].rstrip() + "..."
+                return f"📰 {trimmed}\n\n{hashtag_text}"
             else:
-                trimmed_summary = summary[:allowed_summary].rstrip() + "..."
-                return f"📰 {title}\n\n{trimmed_summary}\n\n{hashtag_text}"
+                trimmed = summary[:allowed].rstrip() + "..."
+                return f"📰 {title}\n\n{trimmed}\n\n{hashtag_text}"
+    else:
+        if len(text) <= STANDARD_CHAR_LIMIT:
+            return text
+        else:
+            # truncate summary
+            reserve = len(f"📰 {title}\n\n{hashtag_text}") + 5
+            allowed = STANDARD_CHAR_LIMIT - reserve
+            if allowed <= 0:
+                max_title = STANDARD_CHAR_LIMIT - len(f"📰 … {hashtag_text}") - 5
+                trimmed = title[:max_title].rstrip() + "..."
+                return f"📰 {trimmed}\n\n{hashtag_text}"
+            else:
+                trimmed = summary[:allowed].rstrip() + "..."
+                return f"📰 {title}\n\n{trimmed}\n\n{hashtag_text}"
 
 # ---------- Post tweet or thread ----------
 def post_tweet(client, text):
     try:
-        print(f"[INFO] Tweet content length: {len(text)}")
+        print(f"[INFO] Tweet length = {len(text)}")
         if USE_LONG_POST:
-            # Try direct post (premium account)
             resp = client.create_tweet(text=text)
-            print("[SUCCESS] Tweet posted (long post):", resp)
+            print("[SUCCESS] Posted long post:", resp)
         else:
-            # Fallback: if too long, split into thread
             if len(text) <= STANDARD_CHAR_LIMIT:
                 resp = client.create_tweet(text=text)
-                print("[SUCCESS] Tweet posted:", resp)
+                print("[SUCCESS] Posted:", resp)
             else:
-                print("[INFO] Splitting into thread because too long")
+                print("[INFO] Splitting into thread")
                 parts = split_into_parts(text, STANDARD_CHAR_LIMIT)
                 prev_id = None
                 for part in parts:
@@ -142,11 +169,10 @@ def post_tweet(client, text):
                     prev_id = resp.data["id"]
                 print("[SUCCESS] Thread posted.")
     except Exception as e:
-        print("[ERROR] Failed to post:", e)
+        print("[ERROR] Failed:", e)
         traceback.print_exc()
 
 def split_into_parts(text, limit):
-    # Split by sentences or by words so threads read well
     words = text.split()
     parts = []
     current = ""
@@ -163,12 +189,23 @@ def split_into_parts(text, limit):
 # ---------- Main ----------
 def main():
     try:
-        print("[INFO] Bot started")
-
+        print("[INFO] Bot starting")
         client = load_twitter_client()
 
         rss_feeds = [
-            # your feeds...
+            "https://feeds.feedburner.com/CoinDesk",
+            "https://cointelegraph.com/rss",
+            "https://cryptoslate.com/feed/",
+            "https://bitcoinmagazine.com/feed/",
+            "https://cryptonews.com/news/feed/",
+            "https://www.ccn.com/news/crypto-news/feeds/",
+            "https://blockchain.news/feed",
+            "https://ambcrypto.com/feed/",
+            "https://u.today/rss",
+            "https://coingape.com/feed/",
+            "https://cryptopotato.com/feed/",
+            "https://newsbtc.com/feed/",
+            "https://zycrypto.com/feed/"
         ]
 
         crypto_keywords = [
@@ -181,12 +218,10 @@ def main():
             "inflation", "interest rate", "fed", "policy"
         ]
 
-        # Extra hashtags you might want
-        extra_tags = ["#Bitcoin", "#Ethereum", "#Altcoins", "#DeFi", "#Blockchain", "#CryptoNews"]
+        extra_tags = []  # not needed now, extraction handles it
 
         random.shuffle(rss_feeds)
         title, summary = None, None
-
         for url in rss_feeds:
             t, s = fetch_relevant_news(url, crypto_keywords, market_keywords)
             if t:
@@ -194,12 +229,12 @@ def main():
                 break
 
         tweet_text = create_tweet_text(title, summary, extra_hashtags=extra_tags)
+        print("[DEBUG] Final tweet text:\n", tweet_text)
         post_tweet(client, tweet_text)
 
     except Exception as e:
-        print("[FATAL ERROR]", e)
+        print("[FATAL] Error:", e)
         traceback.print_exc()
-
 
 if __name__ == "__main__":
     main()
