@@ -97,7 +97,7 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
 # ---------- Create Tweet Text ----------
 def create_tweet_text(title, summary, extra_hashtags=None):
     if not title:
-        return "No relevant crypto or market news right now. #crypto #news"
+        return "No relevant crypto or market news right now. #crypto #news #btc"
 
     title = title.strip()
     summary = summary.strip() if summary else ""
