@@ -4,6 +4,7 @@ import random
 import tweepy
 import feedparser
 import traceback
+import html
 
 # ---------- SETTINGS ----------
 USE_LONG_POST = True
@@ -15,6 +16,7 @@ STANDARD_CHAR_LIMIT = 280
 def clean_html(raw_html):
     if not raw_html:
         return ""
+    raw_html = html.unescape(raw_html)
     raw_html = re.sub(r'<img[^>]+>', '', raw_html)
     raw_html = re.sub(r'<a[^>]+>(.*?)</a>', r'\1', raw_html)
     text = re.sub(r'<[^>]+>', '', raw_html)
@@ -47,6 +49,45 @@ def load_twitter_client():
         access_token_secret=access_token_secret,
         wait_on_rate_limit=True
     )
+
+
+# ---------- Prevent Duplicate Tweets ----------
+def is_duplicate(title, cache_file="last_posted.txt"):
+    """
+    Check if this title was already posted recently.
+    """
+    if not title:
+        return False
+    if not os.path.exists(cache_file):
+        return False
+
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            recent_titles = {line.strip().lower() for line in f if line.strip()}
+        return title.strip().lower() in recent_titles
+    except Exception:
+        return False
+
+
+def mark_as_posted(title, cache_file="last_posted.txt", max_history=50):
+    """
+    Store this title to prevent reposting. Keeps only the latest N entries.
+    """
+    if not title:
+        return
+    title = title.strip()
+    try:
+        existing = []
+        if os.path.exists(cache_file):
+            with open(cache_file, "r", encoding="utf-8") as f:
+                existing = [line.strip() for line in f if line.strip()]
+        existing.append(title)
+        # keep only last N posts
+        existing = existing[-max_history:]
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(existing))
+    except Exception as e:
+        print(f"[WARN] Could not update cache: {e}")
 
 
 # ---------- Hashtag Extraction ----------
@@ -142,11 +183,8 @@ def create_tweet_text(title, summary, extra_hashtags=None):
 def post_tweet(client, text):
     try:
         print(f"[INFO] Tweet length = {len(text)}")
-
-        # ✅ FIXED: Use official API v2 "create_tweet" (supports long posts)
         response = client.create_tweet(text=text)
         print("[SUCCESS] Tweet posted:", response.data)
-
     except tweepy.TweepyException as e:
         print("[ERROR] Tweepy exception:", e)
         traceback.print_exc()
@@ -195,14 +233,27 @@ def main():
                 title, summary = t, s
                 break
 
+        if not title:
+            print("[INFO] No relevant news found. Skipping tweet.")
+            return
+
+        # 🔍 Check duplicate before posting
+        if is_duplicate(title):
+            print("[INFO] Duplicate news detected — skipping post.")
+            return
+
         tweet_text = create_tweet_text(title, summary)
         print("[DEBUG] Final tweet text:\n", tweet_text)
         post_tweet(client, tweet_text)
+
+        # 🧾 Mark as posted
+        mark_as_posted(title)
 
     except Exception as e:
         print("[FATAL] Error:", e)
         traceback.print_exc()
 
 
-if _name_ == "_main_":
+# ---------- Entry Point ----------
+if __name__ == "__main__":
     main()
