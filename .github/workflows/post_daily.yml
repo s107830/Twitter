@@ -1,39 +1,24 @@
-name: Post Crypto Update Daily
-
-on:
-  schedule:
-    - cron: '0 * * * *'    # Runs every hour at minute 0 (UTC)
-  workflow_dispatch:
-
 jobs:
   post:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./scripts  # relative to repo root
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
+      - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Show workspace contents (debug)
-        run: |
-          echo "Working Directory: $GITHUB_WORKSPACE"
-          pwd
-          ls -R .
-
       - name: Run crypto bot
         env:
           TWITTER_CONSUMER_KEY: ${{ secrets.TWITTER_CONSUMER_KEY }}
           TWITTER_CONSUMER_SECRET: ${{ secrets.TWITTER_CONSUMER_SECRET }}
           TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
           TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
-        # Modify path here if file is in a subdirectory
         run: |
-          python <subdir>/crypto_bot20.py
+          python crypto_bot20.py
