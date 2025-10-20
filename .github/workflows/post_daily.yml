@@ -22,12 +22,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Show workspace contents (debug)
+        run: |
+          echo "Working Directory: $GITHUB_WORKSPACE"
+          pwd
+          ls -R .
+
       - name: Run crypto bot
         env:
           TWITTER_CONSUMER_KEY: ${{ secrets.TWITTER_CONSUMER_KEY }}
           TWITTER_CONSUMER_SECRET: ${{ secrets.TWITTER_CONSUMER_SECRET }}
           TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
           TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
+        # Modify path here if file is in a subdirectory
         run: |
-          python crypto_bot18.py
-          #
+          python <subdir>/crypto_bot20.py
