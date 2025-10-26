@@ -143,7 +143,7 @@ def create_tweet_text(title, summary, extra_hashtags=None):
     title = title.strip()
     summary = summary.strip() if summary else ""
 
-    default_hashtags = ["crypto", "news"]
+    default_hashtags = ["crypto", "altcoin", "btc"]
     found = extract_hashtags_from_text(title + " " + summary)
     all_tags = default_hashtags + list(found)
 
