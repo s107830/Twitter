@@ -9,10 +9,9 @@ import hashlib
 import time
 
 # ---------- SETTINGS ----------
-STANDARD_CHAR_LIMIT = 280  # for free-tier users only
-CACHE_FILE = "last_posted.txt"  # located in same directory as script
-# Set max_history to None for “never purge” so duplicates are never reused
-MAX_HISTORY = None  
+STANDARD_CHAR_LIMIT = 500  # adjusted maximum post length
+CACHE_FILE = "last_posted.txt"
+MAX_HISTORY = None  # keep all history to avoid re-posting duplicates
 
 # ---------- Clean HTML ----------
 def clean_html(raw_html):
@@ -129,7 +128,7 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
 
     return None, None
 
-# ---------- Create Tweet Text (Free-Tier) ----------
+# ---------- Create Tweet Text (Up to 500 chars) ----------
 def create_tweet_text(title, summary, extra_hashtags=None):
     if not title:
         return "No relevant crypto or market news right now. #crypto #news #btc"
@@ -162,6 +161,7 @@ def create_tweet_text(title, summary, extra_hashtags=None):
     if len(text) <= limit:
         return text
 
+    # If too long, truncate summary
     reserve = len(f"📰 {title}\n\n{hashtag_text}") + 5
     allowed = limit - reserve
     if allowed <= 0:
