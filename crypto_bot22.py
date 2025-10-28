@@ -7,10 +7,7 @@ import traceback
 import html
 
 # ---------- SETTINGS ----------
-USE_LONG_POST = True
-LONG_POST_CHAR_LIMIT = 25000  # for X Premium Basic
-STANDARD_CHAR_LIMIT = 280
-
+STANDARD_CHAR_LIMIT = 280  # free-user limit on X (formerly Twitter)
 
 # ---------- Clean HTML ----------
 def clean_html(raw_html):
@@ -22,7 +19,6 @@ def clean_html(raw_html):
     text = re.sub(r'<[^>]+>', '', raw_html)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
-
 
 # ---------- Twitter Client ----------
 def load_twitter_client():
@@ -42,7 +38,7 @@ def load_twitter_client():
         raise RuntimeError(f"Missing Twitter credentials: {missing}")
 
     return tweepy.Client(
-        bearer_token=bearer_token,
+        bearer_token=bearer_token or None,
         consumer_key=consumer_key,
         consumer_secret=consumer_secret,
         access_token=access_token,
@@ -50,17 +46,12 @@ def load_twitter_client():
         wait_on_rate_limit=True
     )
 
-
 # ---------- Prevent Duplicate Tweets ----------
 def is_duplicate(title, cache_file="last_posted.txt"):
-    """
-    Check if this title was already posted recently.
-    """
     if not title:
         return False
     if not os.path.exists(cache_file):
         return False
-
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
             recent_titles = {line.strip().lower() for line in f if line.strip()}
@@ -68,11 +59,7 @@ def is_duplicate(title, cache_file="last_posted.txt"):
     except Exception:
         return False
 
-
 def mark_as_posted(title, cache_file="last_posted.txt", max_history=50):
-    """
-    Store this title to prevent reposting. Keeps only the latest N entries.
-    """
     if not title:
         return
     title = title.strip()
@@ -82,30 +69,23 @@ def mark_as_posted(title, cache_file="last_posted.txt", max_history=50):
             with open(cache_file, "r", encoding="utf-8") as f:
                 existing = [line.strip() for line in f if line.strip()]
         existing.append(title)
-        # keep only last N posts
         existing = existing[-max_history:]
         with open(cache_file, "w", encoding="utf-8") as f:
             f.write("\n".join(existing))
     except Exception as e:
         print(f"[WARN] Could not update cache: {e}")
 
-
 # ---------- Hashtag Extraction ----------
 def extract_hashtags_from_text(text, min_len=2):
     tags = set()
-
     for tag in re.findall(r"#([A-Za-z0-9_]+)", text):
         tags.add(tag)
-
     for w in re.findall(r"\b[A-Z]{2,}\b", text):
         tags.add(w)
-
     for phrase in re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text):
         tag = phrase.replace(" ", "")
         tags.add(tag)
-
     return {tag for tag in tags if len(tag) >= min_len}
-
 
 # ---------- Fetch Relevant News ----------
 def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
@@ -114,7 +94,6 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
     if feed.bozo:
         print(f"[WARN] Parse issue {rss_url}: {feed.bozo_exception}")
         return None, None
-
     if not feed.entries:
         return None, None
 
@@ -123,8 +102,10 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
         summary_fields = [
             getattr(entry, "summary", ""),
             getattr(entry, "description", ""),
-            (entry.content[0].get("value", "") if hasattr(entry, "content") else "")
         ]
+        entry_content = getattr(entry, "content", None)
+        if isinstance(entry_content, list) and entry_content:
+            summary_fields.append(entry_content[0].get("value", ""))
         summary = next((clean_html(s) for s in summary_fields if s), "")
         text = (title + " " + summary).lower()
 
@@ -134,8 +115,7 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
 
     return None, None
 
-
-# ---------- Create Tweet Text ----------
+# ---------- Create Tweet Text (for free users) ----------
 def create_tweet_text(title, summary, extra_hashtags=None):
     if not title:
         return "No relevant crypto or market news right now. #crypto #news #btc"
@@ -146,6 +126,8 @@ def create_tweet_text(title, summary, extra_hashtags=None):
     default_hashtags = ["crypto", "altcoin", "btc"]
     found = extract_hashtags_from_text(title + " " + summary)
     all_tags = default_hashtags + list(found)
+    if extra_hashtags:
+        all_tags += extra_hashtags
 
     seen = set()
     formatted = []
@@ -154,7 +136,6 @@ def create_tweet_text(title, summary, extra_hashtags=None):
         if t.lower() not in seen:
             formatted.append(t)
             seen.add(t.lower())
-
     hashtag_text = " ".join(formatted)
 
     if summary:
@@ -162,7 +143,7 @@ def create_tweet_text(title, summary, extra_hashtags=None):
     else:
         text = f"📰 {title}\n\n{hashtag_text}"
 
-    limit = LONG_POST_CHAR_LIMIT if USE_LONG_POST else STANDARD_CHAR_LIMIT
+    limit = STANDARD_CHAR_LIMIT
 
     if len(text) <= limit:
         return text
@@ -178,7 +159,6 @@ def create_tweet_text(title, summary, extra_hashtags=None):
         trimmed = summary[:allowed].rstrip() + "..."
         return f"📰 {title}\n\n{trimmed}\n\n{hashtag_text}"
 
-
 # ---------- Post Tweet ----------
 def post_tweet(client, text):
     try:
@@ -191,7 +171,6 @@ def post_tweet(client, text):
     except Exception as e:
         print("[ERROR] Failed to post:", e)
         traceback.print_exc()
-
 
 # ---------- Main ----------
 def main():
@@ -237,7 +216,6 @@ def main():
             print("[INFO] No relevant news found. Skipping tweet.")
             return
 
-        # 🔍 Check duplicate before posting
         if is_duplicate(title):
             print("[INFO] Duplicate news detected — skipping post.")
             return
@@ -246,13 +224,11 @@ def main():
         print("[DEBUG] Final tweet text:\n", tweet_text)
         post_tweet(client, tweet_text)
 
-        # 🧾 Mark as posted
         mark_as_posted(title)
 
     except Exception as e:
         print("[FATAL] Error:", e)
         traceback.print_exc()
-
 
 # ---------- Entry Point ----------
 if __name__ == "__main__":
