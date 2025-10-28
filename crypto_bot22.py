@@ -5,9 +5,14 @@ import tweepy
 import feedparser
 import traceback
 import html
+import hashlib
+import time
 
 # ---------- SETTINGS ----------
-STANDARD_CHAR_LIMIT = 280  # free-user limit on X (formerly Twitter)
+STANDARD_CHAR_LIMIT = 280  # for free-tier users only
+CACHE_FILE = "last_posted.txt"  # located in same directory as script
+# Set max_history to None for “never purge” so duplicates are never reused
+MAX_HISTORY = None  
 
 # ---------- Clean HTML ----------
 def clean_html(raw_html):
@@ -46,30 +51,38 @@ def load_twitter_client():
         wait_on_rate_limit=True
     )
 
-# ---------- Prevent Duplicate Tweets ----------
-def is_duplicate(title, cache_file="last_posted.txt"):
-    if not title:
+# ---------- Duplicate Checking via Hash ----------
+def compute_hash_text(text: str) -> str:
+    return hashlib.sha256(text.strip().lower().encode('utf-8')).hexdigest()
+
+def is_duplicate_hash(hashval, cache_file=CACHE_FILE):
+    if not hashval:
         return False
     if not os.path.exists(cache_file):
         return False
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
-            recent_titles = {line.strip().lower() for line in f if line.strip()}
-        return title.strip().lower() in recent_titles
-    except Exception:
+            for line in f:
+                stored = line.split("|", 1)[0]
+                if stored == hashval:
+                    return True
+        return False
+    except Exception as e:
+        print(f"[WARN] Could not read cache file: {e}")
         return False
 
-def mark_as_posted(title, cache_file="last_posted.txt", max_history=50):
-    if not title:
+def mark_as_posted_hash(hashval, cache_file=CACHE_FILE, max_history=MAX_HISTORY):
+    if not hashval:
         return
-    title = title.strip()
     try:
         existing = []
         if os.path.exists(cache_file):
             with open(cache_file, "r", encoding="utf-8") as f:
                 existing = [line.strip() for line in f if line.strip()]
-        existing.append(title)
-        existing = existing[-max_history:]
+        entry = f"{hashval}|{int(time.time())}"
+        existing.append(entry)
+        if max_history is not None:
+            existing = existing[-max_history:]
         with open(cache_file, "w", encoding="utf-8") as f:
             f.write("\n".join(existing))
     except Exception as e:
@@ -101,11 +114,12 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
         title = getattr(entry, "title", "").strip()
         summary_fields = [
             getattr(entry, "summary", ""),
-            getattr(entry, "description", ""),
+            getattr(entry, "description", "")
         ]
         entry_content = getattr(entry, "content", None)
         if isinstance(entry_content, list) and entry_content:
             summary_fields.append(entry_content[0].get("value", ""))
+
         summary = next((clean_html(s) for s in summary_fields if s), "")
         text = (title + " " + summary).lower()
 
@@ -115,7 +129,7 @@ def fetch_relevant_news(rss_url, crypto_keywords, market_keywords):
 
     return None, None
 
-# ---------- Create Tweet Text (for free users) ----------
+# ---------- Create Tweet Text (Free-Tier) ----------
 def create_tweet_text(title, summary, extra_hashtags=None):
     if not title:
         return "No relevant crypto or market news right now. #crypto #news #btc"
@@ -148,7 +162,6 @@ def create_tweet_text(title, summary, extra_hashtags=None):
     if len(text) <= limit:
         return text
 
-    # Truncate summary if too long
     reserve = len(f"📰 {title}\n\n{hashtag_text}") + 5
     allowed = limit - reserve
     if allowed <= 0:
@@ -200,8 +213,8 @@ def main():
         ]
         market_keywords = [
             "trump", "biden", "election", "market", "stocks", "nasdaq",
-            "s&p", "dow jones", "price", "rally", "selloff", "economy",
-            "inflation", "interest rate", "fed", "policy"
+            "s&p", "dow jones", "price", "rally", "selloff",
+            "economy", "inflation", "interest rate", "fed", "policy"
         ]
 
         random.shuffle(rss_feeds)
@@ -216,15 +229,15 @@ def main():
             print("[INFO] No relevant news found. Skipping tweet.")
             return
 
-        if is_duplicate(title):
-            print("[INFO] Duplicate news detected — skipping post.")
+        tweet_text = create_tweet_text(title, summary)
+        hashval = compute_hash_text(tweet_text)
+        if is_duplicate_hash(hashval):
+            print(f"[INFO] Duplicate content (hash={hashval}) detected — skipping post.")
             return
 
-        tweet_text = create_tweet_text(title, summary)
         print("[DEBUG] Final tweet text:\n", tweet_text)
         post_tweet(client, tweet_text)
-
-        mark_as_posted(title)
+        mark_as_posted_hash(hashval)
 
     except Exception as e:
         print("[FATAL] Error:", e)
