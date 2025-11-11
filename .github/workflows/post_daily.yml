@@ -2,13 +2,23 @@ name: Post Crypto Update Daily
 
 on:
   schedule:
-    - cron: '0 * * * *'    # Runs every hour at minute 0 (UTC)
+    - cron: '0 * * * *'   # hourly in UTC
   workflow_dispatch:
 
 jobs:
   post:
     runs-on: ubuntu-latest
     steps:
+      - name: Run only at 09, 13, 17, 20 in US Eastern
+        run: |
+          HOUR_ET=$(TZ=America/New_York date +%H)
+          case "$HOUR_ET" in
+            09|13|17|20) echo "It's $HOUR_ET ET — posting." ;;
+            *) echo "It's $HOUR_ET ET — not a post time. Exit."; exit 0 ;;
+          esac
+          # optional small jitter to avoid looking botty
+          sleep $((RANDOM % 600))  # up to 10 min
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
